@@ -1464,7 +1464,7 @@
 
         // Check for early win (all viruses eliminated before using all shots)
         function checkEarlyWin() {
-            if (game.levelCompleting || game.sanitizationZones.length > 0) return;
+            if (game.levelCompleting) return;
 
             // Count remaining non-Helper viruses
             const remainingViruses = game.viruses.filter(v =>
@@ -1911,6 +1911,9 @@
 
             // Draw targeting reticle
             drawReticle();
+
+            // Check for early win
+            checkEarlyWin();
 
             // Check level completion
             checkLevelComplete();
