@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chain Reaction</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #0a0a0f;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #gameCanvas {
+            background: radial-gradient(circle at center, #1a1a2e 0%, #0a0a0f 100%);
+            cursor: pointer;
+            display: block;
+            touch-action: none;
+        }
+
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #score {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            color: #00ff88;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 0 0 10px #00ff88, 0 0 20px #00ff88;
+        }
+
+        #level {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            color: #ff00ff;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 0 0 10px #ff00ff, 0 0 20px #ff00ff;
+        }
+
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 48px;
+            font-weight: bold;
+            text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffff;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        #message.show {
+            opacity: 1;
+        }
+
+        #info {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #888;
+            font-size: 18px;
+            text-align: center;
+            transition: opacity 0.3s;
+        }
+
+        .shake {
+            animation: shake 0.3s ease-in-out;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translate(0, 0); }
+            10%, 30%, 50%, 70%, 90% { transform: translate(-5px, -5px); }
+            20%, 40%, 60%, 80% { transform: translate(5px, 5px); }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+        <div id="score">Score: 0</div>
+        <div id="level">Level: 1</div>
+        <div id="message"></div>
+        <div id="info">Click anywhere to start chain reaction! Need 50% to pass.</div>
+    </div>
+
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const ui = {
+            score: document.getElementById('score'),
+            level: document.getElementById('level'),
+            message: document.getElementById('message'),
+            info: document.getElementById('info')
+        };
+
+        // Resize canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            initLevel();
+        });
+
+        // Game state
+        const game = {
+            score: 0,
+            level: 1,
+            balls: [],
+            explosions: [],
+            particles: [],
+            isPlaying: false,
+            clickUsed: false,
+            totalBalls: 0,
+            destroyedBalls: 0,
+            chainCount: 0
+        };
+
+        // Ball class
+        class Ball {
+            constructor(x, y, isVirus = false) {
+                this.x = x;
+                this.y = y;
+                this.radius = isVirus ? 15 : 10;
+                this.vx = (Math.random() - 0.5) * 5;
+                this.vy = (Math.random() - 0.5) * 5;
+                this.isVirus = isVirus;
+                this.destroyed = false;
+                this.color = isVirus ? '#ff0066' : `hsl(${Math.random() * 360}, 100%, 60%)`;
+            }
+
+            update() {
+                if (this.destroyed) return;
+
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Bounce off walls
+                if (this.x - this.radius <= 0 || this.x + this.radius >= canvas.width) {
+                    this.vx = -this.vx;
+                    this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
+                }
+                if (this.y - this.radius <= 0 || this.y + this.radius >= canvas.height) {
+                    this.vy = -this.vy;
+                    this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
+                }
+            }
+
+            draw() {
+                if (this.destroyed) return;
+
+                ctx.save();
+                ctx.shadowBlur = this.isVirus ? 20 : 10;
+                ctx.shadowColor = this.color;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Virus symbol
+                if (this.isVirus) {
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(this.x - 5, this.y);
+                    ctx.lineTo(this.x + 5, this.y);
+                    ctx.moveTo(this.x, this.y - 5);
+                    ctx.lineTo(this.x, this.y + 5);
+                    ctx.stroke();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        // Explosion class
+        class Explosion {
+            constructor(x, y, isVirus = false) {
+                this.x = x;
+                this.y = y;
+                this.radius = 0;
+                this.maxRadius = isVirus ? 250 : 120;
+                this.growing = true;
+                this.life = 1;
+                this.isVirus = isVirus;
+                this.color = isVirus ? '#ff0066' : '#00ffff';
+            }
+
+            update() {
+                if (this.growing) {
+                    this.radius += 4;
+                    if (this.radius >= this.maxRadius) {
+                        this.growing = false;
+                    }
+                } else {
+                    this.life -= 0.04;
+                }
+                return this.life > 0;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.life * 0.6;
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 4;
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            checkCollision(ball) {
+                if (ball.destroyed) return false;
+                const dist = Math.sqrt((this.x - ball.x) ** 2 + (this.y - ball.y) ** 2);
+                return dist <= this.radius + ball.radius;
+            }
+        }
+
+        // Particle class
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 8 + 2;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.life = 1;
+                this.decay = 0.02;
+                this.size = Math.random() * 4 + 2;
+                this.color = color;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.98;
+                this.vy *= 0.98;
+                this.life -= this.decay;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // Audio context
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playExplosionSound(pitch = 1) {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.frequency.value = 200 * pitch;
+            oscillator.type = 'square';
+
+            gainNode.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.2);
+        }
+
+        function playLevelUpSound() {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.frequency.setValueAtTime(400, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.5);
+            oscillator.type = 'sine';
+
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.5);
+        }
+
+        // Screen shake
+        function shake() {
+            document.body.classList.add('shake');
+            setTimeout(() => {
+                document.body.classList.remove('shake');
+            }, 300);
+        }
+
+        // Show message
+        function showMessage(text, duration = 1500) {
+            ui.message.textContent = text;
+            ui.message.classList.add('show');
+            setTimeout(() => {
+                ui.message.classList.remove('show');
+            }, duration);
+        }
+
+        // Create particles
+        function createParticles(x, y, count = 30, colors = null) {
+            const defaultColors = ['#00ff88', '#ff00ff', '#00ffff', '#ffff00', '#ff6600'];
+            const particleColors = colors || defaultColors;
+
+            for (let i = 0; i < count; i++) {
+                const color = particleColors[Math.floor(Math.random() * particleColors.length)];
+                game.particles.push(new Particle(x, y, color));
+            }
+        }
+
+        // Initialize level
+        function initLevel() {
+            game.balls = [];
+            game.explosions = [];
+            game.particles = [];
+            game.clickUsed = false;
+            game.destroyedBalls = 0;
+            game.chainCount = 0;
+
+            // Increase ball count with level
+            const ballCount = 40 + game.level * 10;
+            game.totalBalls = ballCount;
+
+            console.log(`Initializing level ${game.level} with ${ballCount} balls`);
+            console.log(`Canvas size: ${canvas.width}x${canvas.height}`);
+
+            // Create balls
+            for (let i = 0; i < ballCount; i++) {
+                const isVirus = Math.random() < 0.15; // 15% chance for virus
+                const x = Math.random() * (canvas.width - 40) + 20;
+                const y = Math.random() * (canvas.height - 40) + 20;
+                game.balls.push(new Ball(x, y, isVirus));
+            }
+
+            console.log(`Created ${game.balls.length} balls`);
+
+            game.isPlaying = true;
+            updateUI();
+        }
+
+        // Handle click
+        function handleClick(e) {
+            if (!game.isPlaying || game.clickUsed) return;
+
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+
+            // Hide info
+            ui.info.style.opacity = '0';
+
+            // Create initial explosion
+            game.explosions.push(new Explosion(x, y));
+            game.clickUsed = true;
+            playExplosionSound(1);
+            createParticles(x, y, 20);
+        }
+
+        // Check level completion
+        function checkLevelComplete() {
+            if (!game.clickUsed || game.explosions.length > 0) return;
+
+            const percentDestroyed = (game.destroyedBalls / game.totalBalls) * 100;
+
+            if (percentDestroyed >= 50) {
+                // Success!
+                const bonus = Math.floor(percentDestroyed * 10) * game.level;
+                game.score += bonus;
+                game.level++;
+
+                shake();
+                playLevelUpSound();
+                showMessage(`Level ${game.level}! ${Math.floor(percentDestroyed)}% Chain: ${game.chainCount}x`, 2000);
+
+                setTimeout(() => {
+                    ui.info.style.opacity = '1';
+                    initLevel();
+                }, 2000);
+            } else {
+                // Fail
+                showMessage(`Failed! Only ${Math.floor(percentDestroyed)}% destroyed`, 2000);
+                setTimeout(() => {
+                    ui.info.style.opacity = '1';
+                    initLevel();
+                }, 2000);
+            }
+
+            game.isPlaying = false;
+        }
+
+        // Update UI
+        function updateUI() {
+            ui.score.textContent = `Score: ${game.score}`;
+            ui.level.textContent = `Level: ${game.level}`;
+        }
+
+        // Game loop
+        function gameLoop() {
+            // Clear canvas
+            ctx.fillStyle = 'rgba(10, 10, 15, 0.8)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Update and draw balls
+            game.balls.forEach(ball => {
+                ball.update();
+                ball.draw();
+            });
+
+            // Update and draw explosions
+            game.explosions = game.explosions.filter(explosion => {
+                const alive = explosion.update();
+                explosion.draw();
+
+                // Check collisions with balls
+                if (explosion.growing) {
+                    game.balls.forEach(ball => {
+                        if (explosion.checkCollision(ball)) {
+                            ball.destroyed = true;
+                            game.destroyedBalls++;
+                            game.chainCount++;
+
+                            // Create new explosion
+                            game.explosions.push(new Explosion(ball.x, ball.y, ball.isVirus));
+
+                            // Play sound with increasing pitch
+                            const pitch = 1 + Math.min(game.chainCount * 0.1, 2);
+                            playExplosionSound(pitch);
+
+                            // Create particles
+                            createParticles(ball.x, ball.y, ball.isVirus ? 50 : 30, [ball.color]);
+
+                            // Points
+                            game.score += ball.isVirus ? 50 : 10;
+                            updateUI();
+                        }
+                    });
+                }
+
+                return alive;
+            });
+
+            // Update and draw particles
+            game.particles = game.particles.filter(p => {
+                p.update();
+                p.draw();
+                return p.life > 0;
+            });
+
+            // Check level completion
+            checkLevelComplete();
+
+            // Continue loop
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Event listeners
+        canvas.addEventListener('click', handleClick);
+        canvas.addEventListener('touchstart', handleClick);
+
+        // Start game
+        initLevel();
+        gameLoop();
+    </script>
+</body>
+</html>
