@@ -25,13 +25,22 @@
             align-items: center;
         }
 
-        #gameCanvas {
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
             background: radial-gradient(circle at center, #001d3d 0%, #000814 100%);
             background-size: cover;
             background-position: center;
+        }
+
+        #gameCanvas {
             cursor: none;
             display: block;
             touch-action: none;
+            position: absolute;
+            top: 0;
+            left: 0;
             box-shadow: 0 0 50px rgba(0, 255, 255, 0.3);
         }
 
@@ -172,7 +181,9 @@
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+    </div>
     <div id="ui">
         <div id="score">SCORE: 0</div>
         <div id="level">LEVEL: 1</div>
@@ -185,8 +196,9 @@
 
     <script>
         // Canvas setup
+        const gameContainer = document.getElementById('gameContainer');
         const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d', { alpha: false });
+        const ctx = canvas.getContext('2d', { alpha: true });
         const ui = {
             score: document.getElementById('score'),
             level: document.getElementById('level'),
@@ -210,16 +222,16 @@
 
         // Contaminated locations (progression environments)
         const locations = [
-            { name: 'BATHROOM TOILET', image: 'background-01.png' },
-            { name: 'MOBILE PHONE', image: 'background-02.webp' },
-            { name: 'COMPUTER KEYBOARD', image: 'background-03.webp' },
-            { name: 'DOOR HANDLE', image: 'background-04.png' },
-            { name: 'KITCHEN SINK', image: 'background-05.png' },
-            { name: 'ELEVATOR BUTTON', image: 'background-06.png' },
-            { name: 'ATM MACHINE', image: 'background-07.png' },
-            { name: 'RESTAURANT TABLE', image: 'background-08.png' },
-            { name: 'GYM EQUIPMENT', image: 'background-09.png' },
-            { name: 'SHOPPING CART', image: 'background-10.png' }
+            { name: 'BATHROOM TOILET', image: 'background-01.0' },
+            { name: 'MOBILE PHONE', image: 'background-02.0' },
+            { name: 'COMPUTER KEYBOARD', image: 'background-03.0' },
+            { name: 'DOOR HANDLE', image: 'background-04.0' },
+            { name: 'KITCHEN SINK', image: 'background-05.0' },
+            { name: 'ELEVATOR BUTTON', image: 'background-06.0' },
+            { name: 'ATM MACHINE', image: 'background-07.0' },
+            { name: 'RESTAURANT TABLE', image: 'background-08.0' },
+            { name: 'GYM EQUIPMENT', image: 'background-09.0' },
+            { name: 'SHOPPING CART', image: 'background-10.0' }
         ];
 
         // Game state
@@ -749,11 +761,15 @@
             // Try to load background image, fallback to gradient
             const img = new Image();
             img.onload = function() {
-                canvas.style.backgroundImage = `url('${location.image}')`;
+                console.log('Background image loaded:', location.image);
+                gameContainer.style.backgroundImage = `url('${location.image}')`;
+                gameContainer.style.backgroundSize = 'cover';
+                gameContainer.style.backgroundPosition = 'center';
             };
             img.onerror = function() {
+                console.log('Background image failed to load:', location.image);
                 // Fallback to gradient if image not found
-                canvas.style.backgroundImage = '';
+                gameContainer.style.backgroundImage = '';
             };
             img.src = location.image;
 
@@ -969,9 +985,8 @@
             lastTime = currentTime;
             game.time += deltaTime;
 
-            // Clear canvas with trail effect
-            ctx.fillStyle = 'rgba(0, 8, 20, 0.25)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            // Clear canvas completely to show background
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // Update and draw viruses (optimized loop)
             for (let i = 0; i < game.viruses.length; i++) {
