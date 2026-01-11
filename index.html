@@ -27,7 +27,9 @@
 
         #gameCanvas {
             background: radial-gradient(circle at center, #001d3d 0%, #000814 100%);
-            cursor: crosshair;
+            background-size: cover;
+            background-position: center;
+            cursor: none;
             display: block;
             touch-action: none;
             box-shadow: 0 0 50px rgba(0, 255, 255, 0.3);
@@ -117,6 +119,25 @@
             text-shadow: 0 0 10px #0af;
         }
 
+        #location {
+            position: absolute;
+            bottom: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ff6b00;
+            font-size: 22px;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 0 0 15px #ff6b00, 0 0 25px #ff6b00;
+            letter-spacing: 2px;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        #location.show {
+            opacity: 1;
+        }
+
         .shake {
             animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
         }
@@ -158,6 +179,7 @@
         <div id="stats">CHAIN: 0x | SANITIZED: 0/0</div>
         <div id="shots">SHOTS: 3</div>
         <div id="message"></div>
+        <div id="location"></div>
         <div id="info">CLICK TO DEPLOY SANITIZATION ZONE<br>Target: 50% Viral Elimination</div>
     </div>
 
@@ -171,6 +193,7 @@
             stats: document.getElementById('stats'),
             shots: document.getElementById('shots'),
             message: document.getElementById('message'),
+            location: document.getElementById('location'),
             info: document.getElementById('info')
         };
 
@@ -184,6 +207,20 @@
             resizeCanvas();
             if (!game.isPlaying) initLevel();
         });
+
+        // Contaminated locations (progression environments)
+        const locations = [
+            { name: 'BATHROOM TOILET', image: 'background-01.png' },
+            { name: 'MOBILE PHONE', image: 'background-02.webp' },
+            { name: 'COMPUTER KEYBOARD', image: 'background-03.webp' },
+            { name: 'DOOR HANDLE', image: 'background-04.png' },
+            { name: 'KITCHEN SINK', image: 'background-05.png' },
+            { name: 'ELEVATOR BUTTON', image: 'background-06.png' },
+            { name: 'ATM MACHINE', image: 'background-07.png' },
+            { name: 'RESTAURANT TABLE', image: 'background-08.png' },
+            { name: 'GYM EQUIPMENT', image: 'background-09.png' },
+            { name: 'SHOPPING CART', image: 'background-10.png' }
+        ];
 
         // Game state
         const game = {
@@ -200,7 +237,10 @@
             sanitizedViruses: 0,
             chainCount: 0,
             time: 0,
-            maxParticles: 300
+            maxParticles: 300,
+            mouseX: 0,
+            mouseY: 0,
+            showReticle: false
         };
 
         // Color palettes for viruses
@@ -254,12 +294,17 @@
                     });
                 }
 
-                // Brownian motion parameters
-                this.targetVX = (Math.random() - 0.5) * 2;
-                this.targetVY = (Math.random() - 0.5) * 2;
+                // Brownian motion parameters with level scaling
+                const baseSpeed = 1;
+                const panicSpeedMultiplier = 1 + (game.level - 1) * 0.05 || 1; // Increases 15% per level
+                this.baseSpeed = baseSpeed * panicSpeedMultiplier;
+                this.targetVX = (Math.random() - 0.5) * this.baseSpeed;
+                this.targetVY = (Math.random() - 0.5) * this.baseSpeed;
                 this.vx = this.targetVX;
                 this.vy = this.targetVY;
                 this.directionChangeTimer = Math.random() * 120 + 60;
+                this.isPanicked = false;
+                this.fleeRadius = 150;
 
                 // Animation
                 this.pulsePhase = Math.random() * Math.PI * 2;
@@ -295,44 +340,87 @@
                     return;
                 }
 
-                // Brownian motion - smooth direction changes
-                this.directionChangeTimer--;
-                if (this.directionChangeTimer <= 0) {
-                    this.targetVX = (Math.random() - 0.5) * 2.5;
-                    this.targetVY = (Math.random() - 0.5) * 2.5;
-                    this.directionChangeTimer = Math.random() * 120 + 60;
+                // Evade AI - Flee from cursor
+                const dx = game.mouseX - this.x;
+                const dy = game.mouseY - this.y;
+                const distToCursor = Math.sqrt(dx * dx + dy * dy);
+
+                if (distToCursor < this.fleeRadius && game.showReticle) {
+                    // PANIC MODE: Flee from cursor
+                    this.isPanicked = true;
+                    const fleeAngle = Math.atan2(dy, dx) + Math.PI; // Opposite direction
+                    const fleeSpeed = this.baseSpeed * 1.15;
+
+                    this.targetVX = Math.cos(fleeAngle) * fleeSpeed;
+                    this.targetVY = Math.sin(fleeAngle) * fleeSpeed;
+                } else {
+                    this.isPanicked = false;
+
+                    // Normal Brownian motion
+                    this.directionChangeTimer--;
+                    if (this.directionChangeTimer <= 0) {
+                        this.targetVX = (Math.random() - 0.5) * this.baseSpeed * 1.25;
+                        this.targetVY = (Math.random() - 0.5) * this.baseSpeed * 1.25;
+                        this.directionChangeTimer = Math.random() * 120 + 60;
+                    }
                 }
 
                 // Smooth velocity transitions
-                this.vx += (this.targetVX - this.vx) * 0.05;
-                this.vy += (this.targetVY - this.vy) * 0.05;
+                const smoothing = this.isPanicked ? 0.15 : 0.05;
+                this.vx += (this.targetVX - this.vx) * smoothing;
+                this.vy += (this.targetVY - this.vy) * smoothing;
 
                 // Update position
                 this.x += this.vx;
                 this.y += this.vy;
 
-                // Soft boundary collision with drift
-                const margin = this.baseRadius * 2;
-                if (this.x < margin) {
+                // Advanced boundary handling with bounce-back and screen wrapping hybrid
+                const margin = this.baseRadius * 3;
+                const wrapMargin = this.baseRadius;
+
+                // Horizontal boundaries
+                if (this.x < -wrapMargin) {
+                    // Screen wrap from left to right
+                    this.x = canvas.width + wrapMargin;
+                } else if (this.x > canvas.width + wrapMargin) {
+                    // Screen wrap from right to left
+                    this.x = -wrapMargin;
+                } else if (this.x < margin) {
+                    // Soft bounce from left edge
                     this.x = margin;
+                    this.vx = Math.abs(this.vx) * 0.8;
                     this.targetVX = Math.abs(this.targetVX);
                 } else if (this.x > canvas.width - margin) {
+                    // Soft bounce from right edge
                     this.x = canvas.width - margin;
+                    this.vx = -Math.abs(this.vx) * 0.8;
                     this.targetVX = -Math.abs(this.targetVX);
                 }
 
-                if (this.y < margin) {
+                // Vertical boundaries
+                if (this.y < -wrapMargin) {
+                    // Screen wrap from top to bottom
+                    this.y = canvas.height + wrapMargin;
+                } else if (this.y > canvas.height + wrapMargin) {
+                    // Screen wrap from bottom to top
+                    this.y = -wrapMargin;
+                } else if (this.y < margin) {
+                    // Soft bounce from top edge
                     this.y = margin;
+                    this.vy = Math.abs(this.vy) * 0.8;
                     this.targetVY = Math.abs(this.targetVY);
                 } else if (this.y > canvas.height - margin) {
+                    // Soft bounce from bottom edge
                     this.y = canvas.height - margin;
+                    this.vy = -Math.abs(this.vy) * 0.8;
                     this.targetVY = -Math.abs(this.targetVY);
                 }
 
-                // Animation updates
-                this.pulsePhase += 0.05;
-                this.rotation += this.rotationSpeed;
-                this.eyeJitter = Math.random() * 2 - 1;
+                // Animation updates (faster when panicked)
+                const animSpeed = this.isPanicked ? 0.08 : 0.05;
+                this.pulsePhase += animSpeed;
+                this.rotation += this.rotationSpeed * (this.isPanicked ? 1.5 : 1);
+                this.eyeJitter = Math.random() * (this.isPanicked ? 3 : 2) - (this.isPanicked ? 1.5 : 1);
             }
 
             draw() {
@@ -354,7 +442,8 @@
                     }
                 }
 
-                const pulse = Math.sin(this.pulsePhase) * 0.15 + 1;
+                const pulseIntensity = this.isPanicked ? 0.25 : 0.15;
+                const pulse = Math.sin(this.pulsePhase) * pulseIntensity + 1;
                 const currentRadius = this.radius * pulse;
 
                 // Draw spikes (undulating membrane)
@@ -652,6 +741,30 @@
             game.floatingTexts.push(new FloatingText(x, y, text, color));
         }
 
+        // Set background image based on level
+        function setLevelBackground() {
+            const levelIndex = (game.level - 1) % locations.length;
+            const location = locations[levelIndex];
+
+            // Try to load background image, fallback to gradient
+            const img = new Image();
+            img.onload = function() {
+                canvas.style.backgroundImage = `url('${location.image}')`;
+            };
+            img.onerror = function() {
+                // Fallback to gradient if image not found
+                canvas.style.backgroundImage = '';
+            };
+            img.src = location.image;
+
+            // Show location name
+            ui.location.textContent = `CONTAMINATED: ${location.name}`;
+            ui.location.classList.add('show');
+            setTimeout(() => {
+                ui.location.classList.remove('show');
+            }, 3000);
+        }
+
         // Initialize level
         function initLevel() {
             game.viruses = [];
@@ -663,11 +776,14 @@
             game.chainCount = 0;
             game.levelCompleting = false;
 
+            // Set environment background
+            setLevelBackground();
+
             // Increase virus count with level
             const virusCount = 20 + game.level * 5;
             game.totalViruses = virusCount;
 
-            // Create viruses with 8% King Virus spawn rate
+            // Create viruses with 10% King Virus spawn rate
             for (let i = 0; i < virusCount; i++) {
                 const isKing = Math.random() < 0.1;
                 const margin = 50;
@@ -678,6 +794,19 @@
 
             game.isPlaying = true;
             updateUI();
+        }
+
+        // Handle mouse move for reticle
+        function handleMouseMove(e) {
+            const rect = canvas.getBoundingClientRect();
+            game.mouseX = (e.clientX || e.touches?.[0]?.clientX) - rect.left;
+            game.mouseY = (e.clientY || e.touches?.[0]?.clientY) - rect.top;
+            game.showReticle = true;
+        }
+
+        // Handle mouse leave
+        function handleMouseLeave() {
+            game.showReticle = false;
         }
 
         // Handle click
@@ -750,6 +879,87 @@
             ui.level.textContent = `LEVEL: ${game.level}`;
             ui.stats.textContent = `CHAIN: ${game.chainCount}x | SANITIZED: ${game.sanitizedViruses}/${game.totalViruses}`;
             ui.shots.textContent = `SHOTS: ${game.shotsRemaining}`;
+        }
+
+        // Draw targeting reticle
+        function drawReticle() {
+            if (!game.showReticle || !game.isPlaying) return;
+
+            ctx.save();
+
+            // Outer circle (sanitization zone preview)
+            const zoneRadius = 200;
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.arc(game.mouseX, game.mouseY, zoneRadius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Inner reticle
+            ctx.setLineDash([]);
+            ctx.strokeStyle = '#00ffff';
+            ctx.lineWidth = 2;
+
+            // Crosshair
+            const crossSize = 15;
+            ctx.beginPath();
+            ctx.moveTo(game.mouseX - crossSize, game.mouseY);
+            ctx.lineTo(game.mouseX + crossSize, game.mouseY);
+            ctx.moveTo(game.mouseX, game.mouseY - crossSize);
+            ctx.lineTo(game.mouseX, game.mouseY + crossSize);
+            ctx.stroke();
+
+            // Center dot
+            ctx.fillStyle = '#00ffff';
+            ctx.beginPath();
+            ctx.arc(game.mouseX, game.mouseY, 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Corner brackets
+            const bracketSize = 25;
+            const bracketDist = 20;
+            ctx.lineWidth = 3;
+
+            // Top-left
+            ctx.beginPath();
+            ctx.moveTo(game.mouseX - bracketDist, game.mouseY - bracketDist + bracketSize);
+            ctx.lineTo(game.mouseX - bracketDist, game.mouseY - bracketDist);
+            ctx.lineTo(game.mouseX - bracketDist + bracketSize, game.mouseY - bracketDist);
+            ctx.stroke();
+
+            // Top-right
+            ctx.beginPath();
+            ctx.moveTo(game.mouseX + bracketDist - bracketSize, game.mouseY - bracketDist);
+            ctx.lineTo(game.mouseX + bracketDist, game.mouseY - bracketDist);
+            ctx.lineTo(game.mouseX + bracketDist, game.mouseY - bracketDist + bracketSize);
+            ctx.stroke();
+
+            // Bottom-left
+            ctx.beginPath();
+            ctx.moveTo(game.mouseX - bracketDist, game.mouseY + bracketDist - bracketSize);
+            ctx.lineTo(game.mouseX - bracketDist, game.mouseY + bracketDist);
+            ctx.lineTo(game.mouseX - bracketDist + bracketSize, game.mouseY + bracketDist);
+            ctx.stroke();
+
+            // Bottom-right
+            ctx.beginPath();
+            ctx.moveTo(game.mouseX + bracketDist - bracketSize, game.mouseY + bracketDist);
+            ctx.lineTo(game.mouseX + bracketDist, game.mouseY + bracketDist);
+            ctx.lineTo(game.mouseX + bracketDist, game.mouseY + bracketDist - bracketSize);
+            ctx.stroke();
+
+            // Shots remaining indicator
+            if (game.shotsRemaining > 0) {
+                ctx.fillStyle = '#ffbe0b';
+                ctx.font = 'bold 14px "Courier New"';
+                ctx.textAlign = 'center';
+                ctx.shadowBlur = 5;
+                ctx.shadowColor = '#ffbe0b';
+                ctx.fillText(`${game.shotsRemaining}`, game.mouseX, game.mouseY + 45);
+            }
+
+            ctx.restore();
         }
 
         // Game loop
@@ -838,6 +1048,9 @@
                 }
             }
 
+            // Draw targeting reticle
+            drawReticle();
+
             // Check level completion
             checkLevelComplete();
 
@@ -848,6 +1061,9 @@
         // Event listeners
         canvas.addEventListener('click', handleClick);
         canvas.addEventListener('touchstart', handleClick);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('touchmove', handleMouseMove);
+        canvas.addEventListener('mouseleave', handleMouseLeave);
 
         // Start game
         initLevel();
